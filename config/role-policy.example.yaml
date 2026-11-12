@@ -1,0 +1,70 @@
+# Матрица ролей (документированный ПРИМЕР; фактическое применение —
+# пресеты preset-ho-* бандла @local/hierarchical-orchestrator)
+#
+# Обозначения enforcement:
+#   runtime  — ограничение обеспечивает Harness runtime;
+#   compose  — ограничение обеспечивает состав инструментов пресета;
+#   advisory — правило в инструкциях, проверяется лидом/review (честно помечено).
+
+roles:
+  - id: ho-orchestrator        # depth 0 (альтернативный корневой пресет)
+    depth: 0
+    canDelegateTo: [ho-tech-lead, ho-quality-lead, ho-explorer, ho-backend-developer, ho-frontend-developer, ho-test-engineer, ho-code-reviewer, ho-security-auditor]
+    canDelegate: runtime       # enum allowedAgentPresets + depth 2
+    canWriteFiles: advisory    # корневая сессия имеет полный набор инструментов
+    model: inherit             # маршрут родителя или явный выбор из политики
+
+  - id: standard               # штатный корневой пресет, персона оркестратора
+    depth: 0
+    note: используется по умолчанию (agent-preset-registry default)
+
+  - id: ho-tech-lead           # depth 1
+    depth: 1
+    canDelegateTo: [ho-explorer, ho-backend-developer, ho-frontend-developer, ho-test-engineer]
+    canDelegate: runtime       # enum allowedAgentPresets его инструмента
+    canWriteFiles: advisory
+    model: inherit
+
+  - id: ho-quality-lead        # depth 1
+    depth: 1
+    canDelegateTo: [ho-explorer, ho-test-engineer, ho-code-reviewer, ho-security-auditor]
+    canDelegate: runtime
+    canWriteFiles: advisory
+    model: inherit
+
+  - id: ho-explorer            # depth 2
+    depth: 2
+    canDelegate: none          # compose: делегирующий инструмент не смонтирован (+ runtime depth 2)
+    canWriteFiles: none        # compose: tool-fs {write:false, edit:false}, без shell/jobs
+
+  - id: ho-backend-developer   # depth 2
+    depth: 2
+    canDelegate: none
+    canWriteFiles: allowed-paths  # compose: полный tool-fs; границы путей — advisory
+
+  - id: ho-frontend-developer  # depth 2
+    depth: 2
+    canDelegate: none
+    canWriteFiles: allowed-paths
+
+  - id: ho-test-engineer       # depth 2
+    depth: 2
+    canDelegate: none
+    canWriteFiles: allowed-paths  # тесты/фикстуры; вспомогательный код по разрешению
+
+  - id: ho-code-reviewer       # depth 2
+    depth: 2
+    canDelegate: none
+    canWriteFiles: none
+
+  - id: ho-security-auditor    # depth 2
+    depth: 2
+    canDelegate: none
+    canWriteFiles: none
+
+delegationContract:            # advisory (валидация текста на стороне лида)
+  request:  [task_id, role(agent_preset), objective, context, allowed_paths, forbidden_actions, expected_outputs, acceptance_criteria, retry_limit<=2]
+  response: [task_id, status(planned|running|waiting|review|done|failed|cancelled|blocked), summary, changed_files, tests, risks, handoff]
+
+retryPolicy: {maxRetries: 2, onExhaust: blocked}   # advisory
+budget:       {hardCap: NOT_ENFORCED}              # честно: штатного лимита токенов не настроено

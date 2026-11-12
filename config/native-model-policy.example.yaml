@@ -1,0 +1,37 @@
+# Политика нативных моделей (документированный ПРИМЕР, не устанавливаемый конфиг)
+#
+# Принцип ТЗ: все запросы всех ролей идут через штатную подсистему моделей
+# Harness. Внешние шлюзы/маршрутизаторы (включая OmniRoute-провайдер
+# `<external-gateway>`, оставленный в профиле пользователя) НЕ используются
+# новой конфигурацией: они не входят ни в политику маршрутов, ни в пресеты.
+#
+# Механизм фиксации политики — штатная строка web-бандла
+# `subagent-model-selection-settings` (@deepseek-ai/dsh-tool-subagent/model-selection-settings):
+# enabled + allowedModels записываются в каждую НОВУЮ корневую сессию
+# (событие subagent/model-selection-policy) и наследуются дочерними сессиями.
+# Без зафиксированной политики явный выбор модели ограничен текущим маршрутом
+# родителя. Выбор маршрута вне политики = понятная ошибка, БЕЗ скрытого
+# переключения (fallback по умолчанию выключен).
+
+enabled: true
+
+allowedModels:
+  - provider: zai            # нативный провайдер (каталог pi-ai, ключ ZAI_API_KEY
+    model: glm-5.3-flash     # в ~/.dsh/.credentials.yaml; значение не публикуется)
+    toolCalling: verified    # подтверждено: chat + полный цикл tool call (вся сессия)
+    roles: [all]             # режим A: одна проверенная модель для всех ролей
+
+  - provider: zai
+    model: glm-5.3
+    toolCalling: verify-at-install  # маршруты вне каталога отвергаются preflight
+    roles: [orchestrator, tech-lead, quality-lead, code-reviewer, security-auditor]
+
+fallbackPolicy: none         # скрытый fallback запрещён; ошибка = явный отчёт
+routeChangePolicy: new-session-required  # изменение списка -> новая корневая сессия
+
+# Матрица ролей при наличии нескольких моделей (режим B):
+# orchestrator, tech-lead, quality-lead: сильная модель планирования/кода;
+# explorer: быстрая модель; backend/frontend/test-engineer: coding-модель;
+# code-reviewer, security-auditor: аналитическая модель с большим контекстом.
+# При одной доступной модели все роли используют её (режим A) — это допустимый
+# минимум по ТЗ и текущий режим этой установки.

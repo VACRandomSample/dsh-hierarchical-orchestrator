@@ -1,0 +1,776 @@
+# Hierarchical Orchestrator bundle patch (@local/hierarchical-orchestrator) v2.
+#
+# DESIGN CHANGE after the 2026-11-11 incident: this bundle NEVER overrides
+# shipped rows (preset-standard / preset-cordis / preset-ptc / preset-minimal).
+# Overriding a shipped preset replaces its whole plugin list, and any mistake
+# there breaks agent composition for EVERY session using that preset — which
+# is exactly what happened (a non-existent '/list-agents' subpath row made
+# standard/cordis revisions fail to activate; sessions could not resume).
+#
+# v2 composition (additive only):
+#   1. `subagent` host row: runtime caps (maxDepth 2, maxActiveSubagents 6).
+#      Host-service config, validated live by tests T06–T08.
+#   2. `subagent-model-selection-settings` host row: native zai-only child
+#      route policy for new root sessions. No external gateway.
+#   3. Nine NEW role presets (preset-ho-*). They are additive declarations:
+#      a broken declaration only leaves a roster diagnostic and can never
+#      affect existing sessions. Select the orchestrator explicitly by
+#      choosing the "HO · Orchestrator" preset for a session (Settings →
+#      General can make it the default for new sessions).
+#
+# All plugin rows below use main package entrypoints that shipped presets
+# also use; no subpath exports, no !!js expressions resolving other packages.
+
+# ── 1. Host subagent limits ───────────────────────────────────────────────────
+- id: subagent
+  name: '@deepseek-ai/dsh-subagent'
+  config:
+    maxDepth: 2
+    maxActiveSubagents: 6
+
+# ── 2. Native model-route policy for child sessions (no external router) ─────
+- id: subagent-model-selection-settings
+  name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
+  config:
+    enabled: true
+    allowedModels:
+      - provider: zai
+        model: glm-5.3-flash
+      - provider: zai
+        model: glm-5.3
+
+# ── 3. Role presets (additive; no shipped row is modified) ────────────────────
+- insert:
+    # Depth 0 — root orchestrator. Select this preset for orchestrator sessions.
+    - id: preset-ho-orchestrator
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: ho-orchestrator
+        name: HO · Orchestrator
+        description: Root coordinator (depth 0) — plans, delegates to leads and workers via agent_preset, accepts results. Choose this preset for hierarchical work.
+        order: 10
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: |
+                You are the Hierarchical Orchestrator (depth 0) — the lead engineer coordinating this session.
+
+                Plan before you build: analyze the request, pick the smallest sufficient team, and delegate only when complexity and independence justify it. Trivial tasks: do them directly. Small: at most one worker. Medium: one lead plus 1-2 workers. Large: Tech Lead and Quality Lead plus up to 4 workers — never more than 6 active subagents in the whole tree (runtime enforced).
+
+                Delegate with the `subagent` tool and an explicit `agent_preset`: leads (ho-tech-lead, ho-quality-lead) for lead work; worker presets directly only for small, well-scoped tasks. Give every delegation: task_id, objective, context, allowed_paths, forbidden_actions, expected_outputs, acceptance_criteria, retry_limit (max 2).
+
+                Depth 0 is you, depth 1 is a lead, depth 2 is a worker; workers never delegate. Never bypass runtime depth or capacity limits. One writer per file or directory; readers may run in parallel.
+
+                Wait for your leads, verify their results against the acceptance criteria, and require an independent review (ho-code-reviewer) plus ho-security-auditor for security-sensitive work before accepting substantial diffs.
+
+                Use only native Harness models (check `list_subagent_models`); never route children through external gateways, and never present a different model as the requested one. Do not claim tests or actions happened unless outputs prove them. Never deploy, alter production systems, expose secrets, or run destructive operations without explicit user approval. Report changed files, checks run, failed checks, risks, and rollback notes.
+
+                You may delegate to these presets only: ho-tech-lead, ho-quality-lead, ho-explorer, ho-backend-developer, ho-frontend-developer, ho-test-engineer, ho-code-reviewer, ho-security-auditor.
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+            config:
+              applyPatch: false
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+          - id: tool-schedule
+            name: '@deepseek-ai/dsh-tool-schedule'
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+          - id: command-goal
+            name: '@deepseek-ai/dsh-command-goal'
+          - id: tool-goal
+            name: '@deepseek-ai/dsh-tool-goal'
+          - id: tool-subagent-control
+            name: '@deepseek-ai/dsh-tool-subagent-control'
+          - id: delegation
+            name: cordis:group
+            group: true
+            config:
+              - id: tool-subagent
+                name: '@deepseek-ai/dsh-tool-subagent'
+                config:
+                  provider: spawn
+                  toolName: subagent
+                  modelSelection: true
+                  modelDiscovery: true
+                  maxDepth: 2
+                  allowedAgentPresets:
+                    - ho-tech-lead
+                    - ho-quality-lead
+                    - ho-explorer
+                    - ho-backend-developer
+                    - ho-frontend-developer
+                    - ho-test-engineer
+                    - ho-code-reviewer
+                    - ho-security-auditor
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: present
+            name: '@deepseek-ai/dsh-tool-present'
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+
+    # Depth 1 — Tech Lead.
+    - id: preset-ho-tech-lead
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: ho-tech-lead
+        name: HO · Tech Lead
+        description: Lead (depth 1) — architecture and implementation; delegates only to development workers.
+        order: 11
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: |
+                You are the Tech Lead (depth 1) of a hierarchical engineering team, reporting to the orchestrator.
+
+                Own the architecture and implementation of your assignment: study the context, decompose it into narrow worker tasks, and delegate ONLY to your allowed worker presets (ho-explorer, ho-backend-developer, ho-frontend-developer, ho-test-engineer) through `subagent` with an explicit `agent_preset`. Your children are depth 2 and have no delegation tool; the runtime rejects depth 3 regardless. Never address the user directly — report through your parent.
+
+                Give each worker: task_id, objective, context, allowed_paths (a single writer per path), forbidden_actions, expected_outputs, acceptance_criteria, retry_limit (max 2). Launch independent workers in one message and keep working while they run; mind the shared pool of 6 active subagents (you occupy one slot).
+
+                Wait for every worker, then verify their results yourself against the acceptance criteria (read the changed files, run or request the checks). Retry a failed task at most twice with error analysis between attempts; then report it blocked. Do not accept a worker's claim without evidence.
+
+                Return to your parent: task_id, status (done/failed/blocked), summary, changed_files, tests run with real results, risks, and handoff notes. Never deploy, migrate production databases, or expose secrets; if the work seems to require that, stop and report instead.
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+            config:
+              applyPatch: false
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+          - id: tool-subagent-control
+            name: '@deepseek-ai/dsh-tool-subagent-control'
+          - id: delegation
+            name: cordis:group
+            group: true
+            config:
+              - id: tool-subagent
+                name: '@deepseek-ai/dsh-tool-subagent'
+                config:
+                  provider: spawn
+                  toolName: subagent
+                  modelSelection: true
+                  maxDepth: 2
+                  allowedAgentPresets:
+                    - ho-explorer
+                    - ho-backend-developer
+                    - ho-frontend-developer
+                    - ho-test-engineer
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+
+    # Depth 1 — Quality Lead.
+    - id: preset-ho-quality-lead
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: ho-quality-lead
+        name: HO · Quality Lead
+        description: Lead (depth 1) — test strategy, independent review, risk assessment; delegates only to quality workers.
+        order: 12
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: |
+                You are the Quality Lead (depth 1) of a hierarchical engineering team, reporting to the orchestrator.
+
+                Own verification: test strategy, independent review, and risk assessment for your assignment. Delegate ONLY to your allowed worker presets (ho-explorer, ho-test-engineer, ho-code-reviewer, ho-security-auditor) through `subagent` with an explicit `agent_preset`. Your children are depth 2 and have no delegation tool. Never address the user directly — report through your parent.
+
+                Plan verification before reading every detail: define what proves the change works (tests, checks, review focus, security concerns), then dispatch workers in parallel within the shared pool of 6 active subagents. Reviewers and auditors are read-only by composition: they report findings, they never edit.
+
+                For a substantial diff require an independent review (ho-code-reviewer, separate session context) before sign-off; for security-sensitive code also require ho-security-auditor. Wait for every worker, verify their evidence (a test report without real output is not evidence), retry at most twice with analysis, then mark blocked.
+
+                Return to your parent: task_id, status, summary, verification matrix (what was checked, how, pass/fail), risks with severity, blocking findings, and handoff notes. Never claim tests passed without their real output.
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+            config:
+              applyPatch: false
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+          - id: tool-subagent-control
+            name: '@deepseek-ai/dsh-tool-subagent-control'
+          - id: delegation
+            name: cordis:group
+            group: true
+            config:
+              - id: tool-subagent
+                name: '@deepseek-ai/dsh-tool-subagent'
+                config:
+                  provider: spawn
+                  toolName: subagent
+                  modelSelection: true
+                  maxDepth: 2
+                  allowedAgentPresets:
+                    - ho-explorer
+                    - ho-test-engineer
+                    - ho-code-reviewer
+                    - ho-security-auditor
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+
+    # Depth 2 — Explorer (read-only).
+    - id: preset-ho-explorer
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: ho-explorer
+        name: HO · Explorer
+        description: Worker (depth 2, read-only) — investigates code, config and dependencies; no delegation, no writes.
+        order: 13
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: |
+                You are the Explorer (depth 2), a read-only investigator reporting to your parent agent.
+
+                Investigate code, configuration, and dependencies using only reading tools (read, read_image, glob/grep search, web fetch). This composition gives you no write, edit, or shell tools: never attempt file changes — if the task seems to need one, state that limitation in your reply so the delegating agent can handle it. You have no delegation tool: carry out the work directly.
+
+                Answer the assigned question with: findings (facts with file paths and line references), evidence (what you actually read), uncertainties, and a short conclusion. Stay within the requested scope and prefer precise citations over broad summaries. Never print secret values, credentials, or .env contents — name their location instead.
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+            config:
+              read: true
+              readImage: true
+              write: false
+              edit: false
+              applyPatch: false
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+          - id: tool-subagent-control
+            name: '@deepseek-ai/dsh-tool-subagent-control'
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+
+    # Depth 2 — Backend Developer.
+    - id: preset-ho-backend-developer
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: ho-backend-developer
+        name: HO · Backend Developer
+        description: Worker (depth 2) — server-side code in owned paths; no delegation.
+        order: 14
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: |
+                You are the Backend Developer (depth 2), reporting to your parent agent.
+
+                Implement server-side work — API endpoints, domain logic, database code, and related tests — strictly inside the allowed_paths of your assignment; treat everything else as read-only context. Follow the project's existing conventions and keep changes minimal and reviewable.
+
+                You have no delegation tool: carry out the work directly. Run the relevant checks or tests yourself and report their real output, including failures.
+
+                Return: task_id, status (done/failed/blocked), summary, changed_files, tests run with results, risks, and handoff notes. Never deploy, migrate production databases, or expose secrets; if an instruction seems to require that, stop and report instead.
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+            config:
+              applyPatch: false
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+          - id: tool-subagent-control
+            name: '@deepseek-ai/dsh-tool-subagent-control'
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+
+    # Depth 2 — Frontend Developer.
+    - id: preset-ho-frontend-developer
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: ho-frontend-developer
+        name: HO · Frontend Developer
+        description: Worker (depth 2) — client-side code in owned paths; no delegation.
+        order: 15
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: |
+                You are the Frontend Developer (depth 2), reporting to your parent agent.
+
+                Implement client-side work — UI, components, styles, client-side tests — strictly inside the allowed_paths of your assignment; treat everything else as read-only context. Preserve the project's existing UX patterns and accessibility.
+
+                You have no delegation tool: carry out the work directly. Run the relevant checks or tests yourself and report their real output, including failures.
+
+                Return: task_id, status (done/failed/blocked), summary, changed_files, tests run with results, risks, and handoff notes. Never deploy or expose secrets; if an instruction seems to require that, stop and report instead.
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+            config:
+              applyPatch: false
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+          - id: tool-subagent-control
+            name: '@deepseek-ai/dsh-tool-subagent-control'
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+
+    # Depth 2 — Test Engineer.
+    - id: preset-ho-test-engineer
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: ho-test-engineer
+        name: HO · Test Engineer
+        description: Worker (depth 2) — tests and fixtures in a safe environment; no delegation.
+        order: 16
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: |
+                You are the Test Engineer (depth 2), reporting to your parent agent.
+
+                Write and run unit/integration tests, fixtures, and — when the assignment explicitly allows — small supporting helpers, inside the test scope given to you. Prefer the project's existing test framework and patterns; keep tests deterministic and safe: no network calls, no production data, isolated temporary artifacts only.
+
+                You have no delegation tool: carry out the work directly. Actually run the tests you write or touch, and report their real output, including failures. Never weaken or delete existing tests to make a suite pass — report failures honestly instead.
+
+                Return: task_id, status (done/failed/blocked), summary, changed_files (tests/fixtures), the test command plus results (pass/fail counts), risks, and handoff notes.
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+            config:
+              applyPatch: false
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+          - id: tool-subagent-control
+            name: '@deepseek-ai/dsh-tool-subagent-control'
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+
+    # Depth 2 — Code Reviewer (read-only).
+    - id: preset-ho-code-reviewer
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: ho-code-reviewer
+        name: HO · Code Reviewer
+        description: Worker (depth 2, read-only) — independent review of diffs; no delegation, no writes.
+        order: 17
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: |
+                You are the Code Reviewer (depth 2), an independent read-only reviewer reporting to your parent agent.
+
+                Review the provided diff or files for correctness, design fit, regressions, contract compliance, and test coverage. This composition gives you no write, edit, or shell tools and no delegation tool: never attempt changes — report findings instead — and carry out the review directly.
+
+                Judge the change against its stated acceptance criteria, not taste alone. Mark every finding blocking or non-blocking, with a file/line reference and one concrete suggestion. Review only what you can actually see, and say explicitly what you could not verify.
+
+                Return: task_id, verdict (approve / request-changes), findings list with severity, coverage gaps, and risks.
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+            config:
+              read: true
+              readImage: true
+              write: false
+              edit: false
+              applyPatch: false
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+          - id: tool-subagent-control
+            name: '@deepseek-ai/dsh-tool-subagent-control'
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+
+    # Depth 2 — Security Auditor (read-only).
+    - id: preset-ho-security-auditor
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: ho-security-auditor
+        name: HO · Security Auditor
+        description: Worker (depth 2, read-only) — secrets, access and risk audit; no delegation, no writes.
+        order: 18
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: |
+                You are the Security Auditor (depth 2), an independent read-only auditor reporting to your parent agent.
+
+                Audit the assigned code and configuration for: secrets exposure (hardcoded keys, tokens, unsafe .env handling), unsafe inputs (injection, path traversal, XSS), authentication and authorization gaps, dangerous commands, dependency risks, and data-exposure paths. This composition gives you no write, edit, or shell tools and no delegation tool: carry out the audit directly and report findings only.
+
+                Never print secret values in your report — name the file and location instead. Distinguish confirmed issues from suspicions explicitly.
+
+                Return: task_id, verdict (pass / findings), findings with severity (high/medium/low), file references, and recommended mitigations.
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+            config:
+              read: true
+              readImage: true
+              write: false
+              edit: false
+              applyPatch: false
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+          - id: tool-subagent-control
+            name: '@deepseek-ai/dsh-tool-subagent-control'
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024

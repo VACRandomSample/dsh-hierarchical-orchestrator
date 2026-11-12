@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Hierarchical Orchestrator",
+    "description": "Two-level delegation for DeepSeek Harness: depth 2 and 6-slot subagent pool, native zai-only child model policy, and nine role presets (orchestrator, tech lead, quality lead, explorer, backend developer, frontend developer, test engineer, code reviewer, security auditor). No external model router."
+  }
+}

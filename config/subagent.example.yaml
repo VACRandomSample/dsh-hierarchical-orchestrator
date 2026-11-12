@@ -1,0 +1,54 @@
+# Шаблон настроек Subagent (документированный ПРИМЕР, не устанавливаемый конфиг)
+
+> Файл-шаблон для сопровождения. Фактически применённые значения живут в
+> бандле `@local/hierarchical-orchestrator` (строки `subagent` и
+> `subagent-model-selection-settings`) и могут временно переопределяться
+> пользователем на странице Plugins → Subagent (volatile-настройки).
+
+## Host-плагин `@deepseek-ai/dsh-subagent` (строка id `subagent`)
+
+```yaml
+- id: subagent
+  name: '@deepseek-ai/dsh-subagent'
+  config:
+    maxDepth: 2              # 0→1→2; уровень 3 отклоняется runtime
+    maxActiveSubagents: 6    # общий пул дерева; переполнение -> ACTIVATION_LIMIT_REACHED
+```
+
+## Политика маршрутов дочерних сессий
+(`@deepseek-ai/dsh-tool-subagent/model-selection-settings`, строка id
+`subagent-model-selection-settings`; фиксируется в новой корневой сессии)
+
+```yaml
+- id: subagent-model-selection-settings
+  name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
+  config:
+    enabled: true
+    allowedModels:
+      - provider: zai           # нативный провайдер Harness (pi-ai каталог + ZAI_API_KEY)
+        model: glm-5.3-flash    # подтверждена: chat + полный цикл tool calling
+      - provider: zai
+        model: glm-5.3          # проверяется при установке; при отказе убрать
+```
+
+## Делегирующий инструмент в пресетах (пример из preset-standard)
+
+```yaml
+- id: tool-subagent
+  name: '@deepseek-ai/dsh-tool-subagent'
+  config:
+    provider: spawn            # управляемая активация, continuable child
+    toolName: subagent
+    modelSelection: true       # поля provider/model/reasoning_effort у инструмента
+    modelDiscovery: true       # инструмент list_subagent_models (1 владелец на scope)
+    maxDepth: 2                # независимая от host-настройки страховка
+    allowedAgentPresets:       # enum agent_preset; без значения ребёнок наследует пресет родителя
+      - ho-tech-lead
+      - ho-quality-lead
+      - ho-explorer
+      - ho-backend-developer
+      - ho-frontend-developer
+      - ho-test-engineer
+      - ho-code-reviewer
+      - ho-security-auditor
+```
